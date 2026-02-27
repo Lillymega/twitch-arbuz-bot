@@ -11,6 +11,8 @@ user_scope = [
     AuthScope.MODERATION_READ,
     # AuthScope.CHANNEL_BOT
     # user:read:chat?
+    AuthScope.USER_READ_BROADCAST,
+    AuthScope.USER_EDIT_BROADCAST,
 ]
 bot_scope = [
     # AuthScope.USER_CHAT_READ,
@@ -47,6 +49,14 @@ class Settings(BaseSettings):
     # github_token: SecretStr
     # github_repo_owner: str = "Quantum-0"
     # github_repo_name: str
+    openai_api_key: SecretStr
+    openai_base_url: str = "https://api.aitunnel.ru/v1/"
+    mqtt_host: str = "emqx.msk.quantum0.ru"
+    mqtt_client_id: str = "twitch-bot"
+    mqtt_username: SecretStr
+    mqtt_password: SecretStr
+    direct_handle_messages: bool = True
+    direct_handle_rewards: bool = True
 
     model_config = SettingsConfigDict(env_prefix="", env_file=".env")
 

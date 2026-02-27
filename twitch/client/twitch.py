@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+from more_itertools.recipes import batched
 from twitchAPI.chat import Chat
 from twitchAPI.object.api import (
     ChannelFollowersResult,
@@ -13,6 +14,7 @@ from twitchAPI.object.api import (
     Stream,
     TwitchUser,
     EventSubSubscription,
+    UserActiveExtensions,
 )
 from twitchAPI.twitch import Twitch as TwitchClient
 from twitchAPI.type import AuthScope, CustomRewardRedemptionStatus, UnauthorizedException
@@ -39,7 +41,38 @@ class Twitch:
             settings.bot_access_token, bot_scope, settings.bot_refresh_token
         )
         self._twitch = twitch
-        # await self.get_subscriptions()
+
+    async def send_chat_message_raw(
+        self,
+        broadcaster_id: str,
+        sender_id: str,
+        message: str,
+        reply_parent_message_id: str | None = None,
+    ):
+        async with httpx.AsyncClient() as client:
+            payload = {
+                "broadcaster_id": broadcaster_id,
+                "sender_id": sender_id,
+                "message": message,
+            }
+
+            if reply_parent_message_id:
+                payload["reply_parent_message_id"] = reply_parent_message_id
+
+            resp = await client.post(
+                "https://api.twitch.tv/helix/chat/messages",
+                headers={
+                    "Authorization": f"Bearer {self._twitch.get_app_token()}",
+                    "Client-Id": settings.twitch_client_id,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+
+            if resp.status_code != 200:
+                raise Exception(f"Twitch error: {resp.status_code} {resp.text}")
+
+            return resp.json()
 
     async def build_chat_client(self) -> Chat:
         return await Chat(self._twitch)
@@ -74,14 +107,16 @@ class Twitch:
         )
         return reward
 
-    async def get_streams(self, users: list[User]) -> dict[User, Stream | None]:
-        streams = {
-            x.user_login: x
-            async for x in self._twitch.get_streams(
-                user_login=[user.login_name for user in users]
-            )
-        }
-        return {user: streams.get(user.login_name) for user in users}
+    async def get_streams(self, users: list[User] | list[str]) -> dict[User, Stream | None]:
+        streams = {}
+        for batch in batched(users, 100):
+            streams.update({
+                x.user_login: x
+                async for x in self._twitch.get_streams(
+                    user_login=[(user if isinstance(user, str) else user.login_name) for user in batch]
+                )
+            })
+        return {user: streams.get(user if isinstance(user, str) else user.login_name) for user in users}
 
     @staticmethod
     async def delete_reward(user, reward_id: UUID | str):
@@ -100,14 +135,21 @@ class Twitch:
         reply_parent_message_id: str | None = None,
         for_source_only: bool | None = None,
     ) -> SendMessageResponse:
-        result = await self._twitch.send_chat_message(
-            broadcaster_id=stream_channel.twitch_id,
-            sender_id="957818216",
-            message=message,
-            reply_parent_message_id=reply_parent_message_id,
-            for_source_only=for_source_only,
-        )
-        return result
+        try:
+            return await self.send_chat_message_raw(
+                broadcaster_id=stream_channel.twitch_id,
+                sender_id="957818216",
+                message=message,
+                reply_parent_message_id=reply_parent_message_id,
+            )
+        except:
+            return await self._twitch.send_chat_message(
+                broadcaster_id=stream_channel.twitch_id,
+                sender_id="957818216",
+                message=message,
+                reply_parent_message_id=reply_parent_message_id,
+                for_source_only=for_source_only,
+            )
 
     async def get_subscriptions(self) -> list[EventSubSubscription]:
         try:
@@ -401,4 +443,40 @@ class Twitch:
             reward_id,
             redemption_id,
             CustomRewardRedemptionStatus.FULFILLED,
+        )
+
+    async def get_user_active_ext(
+        self, user: User,
+    ) -> UserActiveExtensions:
+        twitch_user = await TwitchClient(
+            settings.twitch_client_id, settings.twitch_client_secret
+        )
+        await twitch_user.set_user_authentication(
+            user.access_token,
+            [AuthScope.USER_EDIT_BROADCAST, AuthScope.USER_READ_BROADCAST],
+            user.refresh_token,
+        )
+        return await twitch_user.get_user_active_extensions(user.twitch_id)
+
+    async def install_heat_ext(
+        self, user: User,
+    ):
+        twitch_user = await TwitchClient(
+            settings.twitch_client_id, settings.twitch_client_secret
+        )
+        await twitch_user.set_user_authentication(
+            user.access_token,
+            [AuthScope.USER_EDIT_BROADCAST, AuthScope.USER_READ_BROADCAST],
+            user.refresh_token,
+        )
+        await twitch_user.update_user_extensions(
+            UserActiveExtensions(
+                overlay={
+                    "1": dict(
+                        active=True,
+                        id="cr20njfkgll4okyrhag7xxph270sqk",
+                        version="2.1.1"
+                    )
+                }
+            )
         )

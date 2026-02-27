@@ -1,9 +1,11 @@
+import math
 import random
 from typing import Annotated, Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.params import Depends
+from pydantic.color import Color
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.requests import Request
@@ -11,7 +13,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, FileResponse
 from starlette.templating import Jinja2Templates
 
 from config import settings
-from database.models import TwitchUserSettings, User
+from database.models import TwitchUserSettings, User, MemealertsSettings
 from dependencies import get_chat_bot, get_db, get_twitch
 from routers.security_helpers import admin_auth, user_auth, user_auth_optional
 from twitch.chat.bot import ChatBot
@@ -29,12 +31,65 @@ async def index_page(request: Request):
     if request.session.get("user_id"):
         return RedirectResponse(url="/panel")
     else:
-        return RedirectResponse(url="/login")
+        return templates.TemplateResponse(
+            "main.html",
+            {
+                "request": request,
+            }
+        )
 
 
 @router.get("/favicon.ico")
 async def favicon():
     return FileResponse("static/favicon.ico")
+
+
+@router.get("/overlay/jumping-chibi")
+async def overlay_jumping_chibi(
+    request: Request,
+):
+    return templates.TemplateResponse(
+        "overlays/jumping-chibi.html",
+        {
+            "request": request,
+        }
+    )
+
+
+@router.get("/overlay/star")
+async def overlay_star(
+    request: Request,
+    channel_id: int = Query(),
+    pos: float = Query(default=0.5),
+    size: int = Query(default=16),
+    color: Color = Query(default="#ffd45a"),
+    length: float = Query(default=0.39),
+):
+    return templates.TemplateResponse(
+        "overlays/star.html",
+        {
+            "request": request,
+            "channel_id": channel_id,
+            "position": pos,
+            "size": size,
+            "color": color,
+            "length": length,
+        }
+    )
+
+
+@router.get("/overlay/ai-sticker")
+async def overlay_img_gen(
+    request: Request,
+    channel_id: int = Query(),
+):
+    return templates.TemplateResponse(
+        "overlays/imggen.html",
+        {
+            "request": request,
+            "channel_id": channel_id,
+        }
+    )
 
 
 @router.get("/overlay/pair")
@@ -44,6 +99,11 @@ async def overlay_pair(
     channel_id: int = Query(),
     use_twitch_emoji: bool = Query(default=False),
     arbuz: bool = Query(default=False),
+    offset_left: float = Query(0),
+    offset_right: float = Query(0),
+    offset_top: float = Query(0),
+    offset_bottom: float = Query(0),
+    card_scale: float = Query(0.7),
 ):
     if not use_twitch_emoji and not arbuz:
         result = await db.execute(
@@ -102,9 +162,15 @@ async def overlay_pair(
         "overlays/pair.html",
         {
             "cards": cards,
+            "offset": {
+                "top": offset_top,
+                "left": offset_left,
+                "bottom": offset_bottom,
+                "right": offset_right,
+            },
+            "card_scale": card_scale,
             "request": request,
             "channel_id": channel_id,
-            "salt": "test-salt",
         }
     )
 
@@ -116,14 +182,14 @@ async def login():
 
 
 @router.get("/panel")
-async def main_page(
+async def control_panel(
     request: Request,
     user: User = Security(user_auth),
 ):
-    if not user.in_beta_test:
-        return templates.TemplateResponse("beta-test.html", {"request": request})
+    # if not user.in_beta_test:
+    #     return templates.TemplateResponse("beta-test.html", {"request": request})
     return templates.TemplateResponse(
-        "index.html",
+        "panel.html",
         {
             "request": request,
             "user": user,
@@ -245,6 +311,7 @@ async def command_list_page(
 async def get_streamers(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    twitch: Annotated[Twitch, Depends(get_twitch)],
     user: User | None = Security(user_auth_optional),
 ):
     q = (
@@ -254,12 +321,36 @@ async def get_streamers(
             User.followers_count.label("followers"),
             User.in_beta_test.label("is_beta_tester"),
             User.donated.label("donated"),
+            TwitchUserSettings.enable_chat_bot.label("chat_bot_enabled"),
+            MemealertsSettings.memealerts_reward.is_not(None).label("memealerts_enabled")
         )
-        .where(User.followers_count > 10)
-        .limit(400)
+        .select_from(User)
+        .join(TwitchUserSettings)
+        .join(MemealertsSettings)
+        .where(User.followers_count > 2)
+        .limit(500)
     )
-    res = list((await db.execute(q)).fetchall())
-    random.shuffle(res)
+    res = (await db.execute(q)).all()
+
+    def cmp(usr):
+        return (
+            (10 * bool(usr["is_live"])) +
+            (0.6 * math.log10((usr.get("followers", 0) or 0) + 1)) +
+            (2 * (usr["username"] == "quantum075" or usr["donated"] > 0)) +
+            (1 * usr["is_beta_tester"]) +
+            (2 * usr["memealerts_enabled"]) +
+            (3 * usr["chat_bot_enabled"])
+            + (5 * random.random())
+        )
+
+    res = [row._asdict() for row in res]
+    streams = await twitch.get_streams([row["username"] for row in res])
+    for row in res:
+        row["is_live"] = streams.get(row["username"])
+        row["score"] = cmp(row)
+
+    res = sorted(res, key=cmp, reverse=True)
+
     # res = [row._asdict() for row in res] * 20
     # for row in res:
     #     row["followers"] = random.randint(30, 500)
@@ -274,7 +365,6 @@ async def get_streamers(
     #     ratio = s["followers"] / max_followers
     #     s["size"] = int(min_size + (max_size - min_size) * ratio)
 
-    res = [row._asdict() for row in res]
     for row in res:
         row["role"] = "beta" if row["is_beta_tester"] else None
         if row["username"] == "quantum075":
@@ -344,16 +434,34 @@ async def roadmap_page(
                     "text": "Рефакторинг кода, обработка 500-ой ошибки, возможность выбора случайного"
                             " пользователя в некоторых командах, обновление безопасности, новые команды",
                 },
+                {
+                    "date": "Ноябрь 2025",
+                    "text": "Много мелких исправлений, отдельная страничка для внутренней ошибки сайта, иконка сайта."
+                            "добавлена возможность указания рандомного пользователя для команд, исправлена генерация рандома"
+                            "для !хорни и !хвост. Новая команда !dice. Множество новых вариантов ответов для всех команд"
+                },
+                {
+                    "date": "Декабрь 2025",
+                    "text": "НАКОНЕЦ добавлена команад !трусы (ради которой я ушёл от прочих чат-ботов и создал своего). "
+                            "Добавлена команда !якто. Добавлена возможность отказаться от участия в команде !трусы с помощью !запреттрусов"
+                },
+                {
+                    "date": "Январь 2026",
+                    "text": "Добавлен функционал с интерактивыми оверлеями. "
+                            "Бот выходит из бета-теста, пользоваться ботом могут все желающие."
+                },
             ],
             "todos": [
-                "Добавить свою команду !трусы из Mix It Up",
-                'Для команды !трусы сделать возможность отказаться, если пользователь пишет минус, предлагаем: "!отказаться сейчас/тут/везде" - конкретный розыгрыш, канал или все каналы',
-                "Сделать ручку для оверлеев и возможность их настройки",
-                "В список стримеров добавить роли: разраб, донатер, бета-тестер, остальные",
-                "/streamers сортировка по (role, random)",
-                "Target-команды должны работать с реплаями",
-                "можем ли определить что сообщение из другого чата в кооп стриме? если да - не отвечать (опционально?)",
+                "Отчёт об ошибках из мемалёрта в панели управления ботом",
+                "Для команды !трусы - можно попробовать хранить кто чьи забрал, между каналами, куда-нибудь выводить статистику",
+                "Игнорировать сообщения из других каналов при участии в кооп стримах",
+                "Переработать /streamers, разделить на категории: разработка и непосредственная помощь с ботом,"
+                " финансовая поддержка, бета тестеры (рандомные N штук), "
+                " самые активные стримеры (табличка activity_streamer, "
+                "user + count, count++ при каждой команде или награде), "
+                "самые активные юзеры. Так же проверять текущий статус онлайна"
                 "отвечать на 'спасибо', 'пожалуйста', 'дай мем(коин)?ов'",
+                "Дать возможность пользователям поменять дефолтное поведение команд с целью на выбор рандома",
             ],
             "request": request,
             "user": user,

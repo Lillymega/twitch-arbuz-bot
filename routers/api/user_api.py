@@ -8,14 +8,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse
 from twitchAPI.type import TwitchAPIException, TwitchResourceNotFound
 
-from dependencies import get_chat_bot, get_db, get_twitch
-from routers.schemas import UpdateMemealertsCoinsSchema, UpdateSettingsForm
+from database.models import User
+from dependencies import get_chat_bot, get_db, get_twitch, get_sse_manager
+from routers.schemas import UpdateMemealertsCoinsSchema, UpdateSettingsForm, BoolResponseSchema
 from routers.security_helpers import user_auth
+from services.sse_manager import SSEManager
 from twitch.chat.bot import ChatBot
 from twitch.client.twitch import Twitch
+from utils.enums import SSEChannel
 from utils.memes import token_expires_in_days
 
 router = APIRouter(prefix="/user", tags=["User API"])
+
+
+@router.get("/check-sse", response_model=BoolResponseSchema)
+async def check_user_sse_connected(
+    ssem: Annotated[SSEManager, Depends(get_sse_manager)],
+    user: User = Security(user_auth),
+    channel: SSEChannel | None = None,
+) -> BoolResponseSchema:
+    return BoolResponseSchema(result=ssem.has_clients(int(user.twitch_id), channel))
+
+
+@router.get("/check-heat-installed", response_model=BoolResponseSchema)
+async def check_heat_installed(
+    twitch: Annotated[Twitch, Depends(get_twitch)],
+    user: User = Security(user_auth),
+) -> BoolResponseSchema:
+    exts = await twitch.get_user_active_ext(user)
+    overlay = exts.overlay.get('1')
+    if overlay and overlay.active and overlay.id == 'cr20njfkgll4okyrhag7xxph270sqk':
+        return BoolResponseSchema(result=True)
+    return BoolResponseSchema(result=False)
+
+
+@router.get("/install-heat", response_model=BoolResponseSchema)
+async def install_heat(
+    twitch: Annotated[Twitch, Depends(get_twitch)],
+    user: User = Security(user_auth),
+) -> BoolResponseSchema:
+    await twitch.install_heat_ext(user)
+    return BoolResponseSchema(result=True)
+
 
 
 @router.post("/update_settings")
@@ -26,14 +60,6 @@ async def update_settings(
     twitch: Annotated[Twitch, Depends(get_twitch)],
     user: Any = Security(user_auth),
 ):
-    # user.settings: TwitchUserSettings
-    # if data.enable_bite is not None:
-    #     user.settings.enable_bite = data.enable_bite
-    # if data.enable_lick is not None:
-    #     user.settings.enable_lick = data.enable_lick
-    # if data.enable_boop is not None:
-    #     user.settings.enable_boop = data.enable_boop
-
     for field in data.model_fields_set:
         value = getattr(data, field)
         if value is not None:
@@ -156,6 +182,51 @@ async def setup_memealert(
         except TwitchResourceNotFound:
             pass
         user.memealerts.memealerts_reward = None
+        await db.commit()
+        await db.refresh(user.memealerts)
+        return JSONResponse({"title": "Успешно", "message": "Награда удалена."}, 200)
+
+
+@router.post("/setup-ai-stickers")
+async def setup_ai_stickers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    twitch: Annotated[Twitch, Depends(get_twitch)],
+    user: Any = Security(user_auth),
+    enable: bool = Query(default=True),
+):
+    reward_id = user.settings.ai_sticker_reward_id
+
+    if enable:
+        try:
+            reward = await twitch.create_reward(
+                user,
+                "AI Sticker",
+                5000,
+                "Введи описание, по которому будет сгенерирован стикер и налеплен стримеру на экран :з",
+                is_user_input_required=True,
+            )
+        except TwitchAPIException as exc:
+            if "CREATE_CUSTOM_REWARD_DUPLICATE_REWARD" in str(exc):
+                return JSONResponse(
+                    {"title": "Ошибка", "message": "Награда уже существует."}, 400
+                )
+            if "CREATE_CUSTOM_REWARD_TOO_MANY_REWARDS" in str(exc):
+                return JSONResponse(
+                    {"title": "Ошибка", "message": "Слишком много наград на канале."},
+                    400,
+                )
+
+        user.settings.ai_sticker_reward_id = reward.id
+        await db.commit()
+        await db.refresh(user.settings)
+        await twitch.subscribe_reward(user, reward.id)
+        return JSONResponse({"title": "Успешно", "message": "Награда создана."}, 201)
+    else:
+        try:
+            await twitch.delete_reward(user, reward_id)
+        except TwitchResourceNotFound:
+            pass
+        user.settings.ai_sticker_reward_id = None
         await db.commit()
         await db.refresh(user.memealerts)
         return JSONResponse({"title": "Успешно", "message": "Награда удалена."}, 200)

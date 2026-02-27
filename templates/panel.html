@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Настройки — Quantum0's Bot{% endblock %}
+
+{% block styles %}
+{{ super() }}
+{% endblock %}
+
+{% block head_scripts %}
+<script src="/static/js/panel-scripts.js"></script>
+<script>
+    const channel_id = {{ user.twitch_id }};
+</script>
+{% endblock %}
+
+{% block content %}
+<h2>Привет, {{ user.login_name }}!</h2>
+<p>Добро пожаловать в панель управления ботом. Здесь вы можете настроить весь необходимый функционал для своих стиримов.</p>
+
+<section>
+{% include "panel/chatbot.html" %}
+</section>
+
+<section>
+{% include "panel/memealerts.html" %}
+</section>
+
+<section>
+{% include "panel/other.html" %}
+</section>
+
+<section>
+{% include "panel/overlays.html" %}
+</section>
+
+<div class="notification-container"></div>
+
+<div class="modal" id="memealert-modal">
+    <div class="modal-content bg-liquid-glass">
+        <h3>Введите ключ</h3>
+        <input type="text" id="memealert-key" placeholder="Ваш ключ">
+        <a class="tutorial-link" href="/memealerts-tutorial" target="_blank"><b>Как его получить?</b></a>
+        <p>Для того, чтобы обновилось время жизни токена - нужно переавторизоваться на самом Memealerts.</p>
+        <div class="modal-buttons">
+            <button type="button" class="btn-cancel" onclick="closeModal()">Отмена</button>
+            <button type="button" id="save-btn" onclick="saveMemealert()">Сохранить</button>
+        </div>
+    </div>
+</div>
+{% endblock %}

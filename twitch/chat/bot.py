@@ -4,6 +4,7 @@ import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from time import time
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
@@ -67,11 +68,14 @@ class ChatBot:
         self._command_manager.register(BonkCommand)
         self._command_manager.register(BushCommand)
         self._command_manager.register(LickCommand)
+        self._command_manager.register(FeedCommand)
         self._command_manager.register(BananaCommand)
         self._command_manager.register(TailCommand)
+        self._command_manager.register(TreatCommand)
         self._command_manager.register(HornyGoodCommand)
         self._command_manager.register(BoopCommand)
         self._command_manager.register(PatCommand)
+        self._command_manager.register(PastaCommand)
         self._command_manager.register(HugCommand)
         self._command_manager.register(LurkCommand)
         self._command_manager.register(PantsCommand)
@@ -137,12 +141,17 @@ class ChatBot:
             if not user:
                 logger.error(f"User {channel_name} not found")
                 raise UserNotFoundInDatabase
-            if not user.in_beta_test:
-                logger.error(f"User {channel_name} not in beta test")
-                raise NotInBetaTest
+            # if not user.in_beta_test:
+            #     logger.error(f"User {channel_name} not in beta test")
+            #     raise NotInBetaTest
             yield user
 
-    async def on_message(self, message: ChatMessageWebhookEventSchema):
+    async def on_message(self, raw_message: ChatMessageWebhookEventSchema | dict[str, Any]):
+        if isinstance(raw_message, dict):
+            message = ChatMessageWebhookEventSchema.model_validate(raw_message)
+        else:
+            message = raw_message
+
         channel = message.broadcaster_user_login
 
         logger.debug(f"Got message `{message.message.text}` from channel `{channel}`")

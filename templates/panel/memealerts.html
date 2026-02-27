@@ -1,0 +1,37 @@
+<h3>Настройки мемалёртов</h3>
+<small class="overlay-copy-hint">
+    <p>Здесь представлены настройки для подключения награды, с помощью которой зрители могут купить мемкоины за баллы канала.</p>
+    <p>Пожалуйста, не подключайте это во время стрима.</p>
+    <p>Вы можете редактировать стоимость награды, её описание и название как пожелаете, это не повлияет на её работу.</p>
+    <p>Количество мемкоинов, которые пользователь получит, устанавливается <a href="https://dashboard.twitch.tv/u/{{ user.login_name }}/viewer-rewards/channel-points/rewards">здесь</a>.</p>
+    <p>НЕ ВКЛЮЧАЙТЕ <u>Пропустить очередь запросов на награды</u>, бот сам отмечает награду выполненной, если начисление прошло успешно, и отклоняет выполнение награды, возвращая баллы, если не получилось.</p>
+    <p>В случае возникновения проблем, проверьте, что у вас включена отправка мемов, пользователь получил приветственный бонус или отправлял мемы ранее, время жизни токена не истекло. Если решить проблему не получается самостоятельно, обратитесь к <a href="https://t.me/quantum0">автору бота</a>.</p>
+</small>
+{% if memealerts.enabled %}
+    <button id="memealerts-btn" class="btn-danger" onclick="toggleMemealerts(false)">Отключить мемалёрты</button>
+    <p>Время жизни токена:
+        {% if memealerts.expires_in == 0 %}
+            <span style="font-weight: bold; color: red;">{{ memealerts.expires_in }} дней</span>
+        {% else %}
+            {{ memealerts.expires_in }} дней
+        {% endif %}. По истечению срока действия токена его необходимо будет обновить.
+    </p>
+    <button id="refresh-token-btn" onclick="openRefreshModal()">Обновить токен</button>
+    <div class="memealert-coins-wrapper">
+        <span>Количество мемкоинов за награду</span>
+        <div class="memealert-coins">
+            <!-- TODO: REFACTOR -->
+            <button type="button" class="coin-btn" onclick="changeCoinCount(-1)">−</button>
+            <input type="number" id="coin-count" min="1" max="100" value="{{ memealerts.coins_for_reward }}">
+            <button type="button" class="coin-btn" onclick="changeCoinCount(1)">+</button>
+        </div>
+    </div>
+{% else %}
+    <button id="memealerts-btn" onclick="openActivateModal()">Включить мемалёрты</button>
+{% endif %}
+
+
+
+
+
+
