@@ -20,6 +20,32 @@ services:
 #      - POSTGRES_DB=twitch_bot
 #    volumes:
 #      - postgres_data:/var/lib/postgresql/data
+#
+#  emqx:
+#    container_name: emqx
+#    image: emqx/emqx
+#    healthcheck:
+#      test: [ "CMD", "/opt/emqx/bin/emqx", "ctl", "status" ]
+#      interval: 5s
+#      timeout: 25s
+#      retries: 5
+#    volumes:
+#      - emqx_data:/opt/emqx/data:rw
+#    ports:
+#      - "1883:1883"
+#      - "127.0.0.1:8083:8083"
+#      - "127.0.0.1:8084:8084"
+#      - "127.0.0.1:8883:8883"
+#      - "18083:18083"
+#    restart: unless-stopped
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '0.5'
+#          memory: 1G
+#        reservations:
+#          cpus: '0.25'
+#          memory: 400M
 
 #  vmagent:
 #    image: victoriametrics/vmagent
@@ -53,6 +79,7 @@ services:
 #    command:
 #      - "--vmui.defaultDatasourceUrl=http://localhost:8428"
 
-volumes:
+#volumes:
 #  postgres_data:
-  vmdata:
+#  emqx_data:
+#  vmdata:
